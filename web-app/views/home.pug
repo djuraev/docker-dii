@@ -1,0 +1,223 @@
+doctype html
+html(lang='en')
+  head
+    meta(charset='UTF-8')
+    meta(name='viewport', content='width=device-width, initial-scale=1.0')
+    title Docker Tic-Tac-Toe
+    link(rel='stylesheet', href='https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css')
+    style.
+      body {
+        background: linear-gradient(135deg, #0db7ed 0%, #384d54 100%);
+        min-height: 100vh;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2rem 1rem;
+      }
+      h1 { font-weight: 700; margin-bottom: 0.3rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+      .whale { font-size: 3rem; }
+      .status {
+        font-size: 1.4rem;
+        margin: 1rem 0;
+        padding: 0.6rem 1.4rem;
+        background: rgba(255,255,255,0.15);
+        border-radius: 8px;
+        backdrop-filter: blur(10px);
+        min-width: 280px;
+        text-align: center;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(3, 100px);
+        grid-template-rows: repeat(3, 100px);
+        gap: 8px;
+        margin: 1.5rem 0;
+        background: rgba(255,255,255,0.1);
+        padding: 8px;
+        border-radius: 12px;
+      }
+      .cell {
+        background: rgba(255,255,255,0.95);
+        color: #384d54;
+        font-size: 3.5rem;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        border-radius: 8px;
+        transition: transform 0.1s, background 0.2s;
+        user-select: none;
+      }
+      .cell:hover:not(.taken) { background: #0db7ed; color: #fff; transform: scale(1.05); }
+      .cell.taken { cursor: not-allowed; }
+      .cell.win { background: #28a745 !important; color: #fff !important; animation: pulse 0.6s; }
+      @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.15); }
+        100% { transform: scale(1); }
+      }
+      .controls { margin-top: 1rem; display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; }
+      .btn-game { padding: 0.6rem 1.4rem; font-weight: 600; border-radius: 8px; }
+      .scoreboard {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+      .score-card {
+        background: rgba(255,255,255,0.15);
+        padding: 0.8rem 1.4rem;
+        border-radius: 8px;
+        text-align: center;
+        min-width: 90px;
+      }
+      .score-card .label { font-size: 0.8rem; opacity: 0.85; text-transform: uppercase; }
+      .score-card .value { font-size: 1.8rem; font-weight: bold; }
+      .footer { margin-top: 2rem; opacity: 0.75; font-size: 0.9rem; text-align: center; }
+  body
+    div.whale 🐳
+    h1 Docker Tic-Tac-Toe
+    p.lead Containerized fun. X vs O.
+
+    div.status#status Player X turn
+
+    div.board#board
+      - for (var i = 0; i < 9; i++)
+        div.cell(data-idx=i)
+
+    div.controls
+      button.btn.btn-light.btn-game#reset Reset Round
+      button.btn.btn-outline-light.btn-game#clear Clear Score
+
+    div.scoreboard
+      div.score-card
+        div.label Player X
+        div.value#scoreX 0
+      div.score-card
+        div.label Draws
+        div.value#scoreD 0
+      div.score-card
+        div.label Player O
+        div.value#scoreO 0
+
+    div.footer
+      p Running in Docker container · Node.js + Express + Pug
+
+    script.
+      (function() {
+        const board = Array(9).fill(null);
+        const cells = document.querySelectorAll('.cell');
+        const statusEl = document.getElementById('status');
+        const resetBtn = document.getElementById('reset');
+        const clearBtn = document.getElementById('clear');
+        const scoreXEl = document.getElementById('scoreX');
+        const scoreOEl = document.getElementById('scoreO');
+        const scoreDEl = document.getElementById('scoreD');
+        let current = 'X';
+        let active = true;
+        const score = { X: 0, O: 0, D: 0 };
+
+        const wins = [
+          [0,1,2],[3,4,5],[6,7,8],
+          [0,3,6],[1,4,7],[2,5,8],
+          [0,4,8],[2,4,6]
+        ];
+
+        function checkWin() {
+          for (const line of wins) {
+            const [a,b,c] = line;
+            if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+              return { winner: board[a], line };
+            }
+          }
+          if (board.every(v => v !== null)) return { winner: 'D', line: [] };
+          return null;
+        }
+
+        function updateStatus(text) { statusEl.textContent = text; }
+
+        const rowNames = ['first', 'second', 'third'];
+        const colNames = ['first', 'second', 'third'];
+
+        function describeCell(idx) {
+          const row = Math.floor(idx / 3);
+          const col = idx % 3;
+          return colNames[col] + ' button on ' + rowNames[row] + ' row';
+        }
+
+        function sendLog(message, data) {
+          const payload = Object.assign({ message: message, ts: new Date().toISOString() }, data || {});
+          console.log('[tictactoe] ' + message, data || '');
+          try {
+            fetch('/log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            }).catch(function(err) { console.warn('log post failed', err); });
+          } catch (e) { console.warn('log error', e); }
+        }
+
+        function handleClick(e) {
+          const idx = parseInt(e.currentTarget.dataset.idx, 10);
+          if (!active) {
+            sendLog('Click ignored (game over) on ' + describeCell(idx), { idx: idx, state: 'inactive' });
+            return;
+          }
+          if (board[idx]) {
+            sendLog('Click ignored (cell taken) on ' + describeCell(idx) + ' — already has ' + board[idx], { idx: idx, state: 'taken' });
+            return;
+          }
+          sendLog(current + ' is clicked on ' + describeCell(idx), { idx: idx, player: current });
+          board[idx] = current;
+          e.currentTarget.textContent = current;
+          e.currentTarget.classList.add('taken');
+
+          const result = checkWin();
+          if (result) {
+            active = false;
+            if (result.winner === 'D') {
+              score.D++;
+              scoreDEl.textContent = score.D;
+              updateStatus("Draw! No winner.");
+              sendLog('Draw — no winner', { score: Object.assign({}, score) });
+            } else {
+              score[result.winner]++;
+              (result.winner === 'X' ? scoreXEl : scoreOEl).textContent = score[result.winner];
+              result.line.forEach(i => cells[i].classList.add('win'));
+              updateStatus("Player " + result.winner + " wins!");
+              sendLog('Player ' + result.winner + ' wins on line ' + JSON.stringify(result.line), { winner: result.winner, line: result.line, score: Object.assign({}, score) });
+            }
+            return;
+          }
+
+          current = current === 'X' ? 'O' : 'X';
+          updateStatus("Player " + current + " turn");
+        }
+
+        function reset() {
+          for (let i = 0; i < 9; i++) board[i] = null;
+          cells.forEach(c => {
+            c.textContent = '';
+            c.classList.remove('taken', 'win');
+          });
+          current = 'X';
+          active = true;
+          updateStatus("Player X turn");
+          sendLog('Round reset', {});
+        }
+
+        function clearScore() {
+          score.X = 0; score.O = 0; score.D = 0;
+          scoreXEl.textContent = 0;
+          scoreOEl.textContent = 0;
+          scoreDEl.textContent = 0;
+          reset();
+          sendLog('Score cleared', {});
+        }
+
+        cells.forEach(c => c.addEventListener('click', handleClick));
+        resetBtn.addEventListener('click', reset);
+        clearBtn.addEventListener('click', clearScore);
+      })();

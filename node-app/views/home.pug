@@ -1,0 +1,363 @@
+doctype html
+html(lang='en')
+  head
+    meta(charset='UTF-8')
+    meta(name='viewport', content='width=device-width, initial-scale=1.0')
+    title Docker Minesweeper
+    link(rel='stylesheet', href='https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css')
+    style.
+      body {
+        background: linear-gradient(135deg, #0db7ed 0%, #384d54 100%);
+        min-height: 100vh;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 2rem 1rem;
+      }
+      h1 { font-weight: 700; margin-bottom: 0.3rem; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+      .whale { font-size: 3rem; }
+      .hud {
+        display: flex;
+        gap: 1rem;
+        margin: 1rem 0;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .hud-item {
+        background: rgba(255,255,255,0.15);
+        backdrop-filter: blur(10px);
+        padding: 0.6rem 1.2rem;
+        border-radius: 8px;
+        min-width: 110px;
+        text-align: center;
+      }
+      .hud-item .label { font-size: 0.75rem; opacity: 0.85; text-transform: uppercase; }
+      .hud-item .value { font-size: 1.5rem; font-weight: bold; font-family: 'Courier New', monospace; }
+      .status {
+        font-size: 1.2rem;
+        margin: 0.6rem 0;
+        padding: 0.5rem 1.2rem;
+        background: rgba(255,255,255,0.15);
+        border-radius: 8px;
+        min-width: 260px;
+        text-align: center;
+      }
+      .board {
+        display: grid;
+        gap: 2px;
+        background: rgba(0,0,0,0.3);
+        padding: 6px;
+        border-radius: 8px;
+        margin: 1rem 0;
+      }
+      .cell {
+        width: 34px;
+        height: 34px;
+        background: #b0bec5;
+        border-top: 3px solid #eceff1;
+        border-left: 3px solid #eceff1;
+        border-bottom: 3px solid #607d8b;
+        border-right: 3px solid #607d8b;
+        font-size: 1.1rem;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        user-select: none;
+        color: #1a1a1a;
+        box-sizing: border-box;
+      }
+      .cell.revealed {
+        background: #cfd8dc;
+        border: 1px solid #90a4ae;
+      }
+      .cell.mine {
+        background: #e53935;
+        color: #fff;
+      }
+      .cell.flag { color: #d32f2f; }
+      .cell.n1 { color: #1976d2; }
+      .cell.n2 { color: #388e3c; }
+      .cell.n3 { color: #d32f2f; }
+      .cell.n4 { color: #7b1fa2; }
+      .cell.n5 { color: #f57c00; }
+      .cell.n6 { color: #00838f; }
+      .cell.n7 { color: #424242; }
+      .cell.n8 { color: #000; }
+      .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; margin: 0.6rem 0; }
+      .btn-game { padding: 0.5rem 1.2rem; font-weight: 600; border-radius: 8px; }
+      select.form-control { width: auto; display: inline-block; }
+      .footer { margin-top: 1.5rem; opacity: 0.75; font-size: 0.85rem; text-align: center; }
+      .hint { opacity: 0.85; font-size: 0.85rem; margin-top: 0.5rem; }
+  body
+    div.whale 🐳💣
+    h1 Docker Minesweeper
+    p.lead Containerized classic. Avoid the mines.
+
+    div.hud
+      div.hud-item
+        div.label Mines Left
+        div.value#mineCount 10
+      div.hud-item
+        div.label Time
+        div.value#timer 0
+      div.hud-item
+        div.label Cells Left
+        div.value#cellsLeft 0
+      div.hud-item
+        div.label Wins / Losses
+        div.value#record 0 / 0
+
+    div.status#status Click any cell to start
+
+    div.controls
+      select.form-control#difficulty
+        option(value='easy', selected='selected') Easy (9×9, 10 mines)
+        option(value='medium') Medium (16×16, 40 mines)
+        option(value='hard') Hard (16×30, 99 mines)
+      button.btn.btn-light.btn-game#reset New Game
+
+    div.board#board
+
+    p.hint Left click to reveal · Right click to flag · First click is always safe
+
+    div.footer
+      p Running in Docker container · Node.js + Express + Pug
+
+    script.
+      (function() {
+        const DIFFICULTIES = {
+          easy:   { rows: 9,  cols: 9,  mines: 10 },
+          medium: { rows: 16, cols: 16, mines: 40 },
+          hard:   { rows: 16, cols: 30, mines: 99 }
+        };
+
+        const boardEl = document.getElementById('board');
+        const statusEl = document.getElementById('status');
+        const mineCountEl = document.getElementById('mineCount');
+        const timerEl = document.getElementById('timer');
+        const cellsLeftEl = document.getElementById('cellsLeft');
+        const recordEl = document.getElementById('record');
+        const difficultyEl = document.getElementById('difficulty');
+        const resetBtn = document.getElementById('reset');
+
+        let cfg = DIFFICULTIES.easy;
+        let grid = [];
+        let revealed = [];
+        let flagged = [];
+        let mineMap = [];
+        let firstClick = true;
+        let gameOver = false;
+        let cellsRemaining = 0;
+        let flagsPlaced = 0;
+        let timerId = null;
+        let elapsed = 0;
+        let wins = 0;
+        let losses = 0;
+
+        function sendLog(message, data) {
+          const payload = Object.assign({ message: message, ts: new Date().toISOString() }, data || {});
+          console.log('[minesweeper] ' + message, data || '');
+          try {
+            fetch('/log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            }).catch(function(err) { console.warn('log post failed', err); });
+          } catch (e) { console.warn('log error', e); }
+        }
+
+        function idx(r, c) { return r * cfg.cols + c; }
+        function inBounds(r, c) { return r >= 0 && r < cfg.rows && c >= 0 && c < cfg.cols; }
+
+        function neighbors(r, c) {
+          const out = [];
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              if (inBounds(r + dr, c + dc)) out.push([r + dr, c + dc]);
+            }
+          }
+          return out;
+        }
+
+        function placeMines(safeR, safeC) {
+          mineMap = new Array(cfg.rows * cfg.cols).fill(false);
+          const safeSet = new Set();
+          safeSet.add(idx(safeR, safeC));
+          neighbors(safeR, safeC).forEach(([r, c]) => safeSet.add(idx(r, c)));
+
+          let placed = 0;
+          while (placed < cfg.mines) {
+            const i = Math.floor(Math.random() * cfg.rows * cfg.cols);
+            if (mineMap[i] || safeSet.has(i)) continue;
+            mineMap[i] = true;
+            placed++;
+          }
+
+          grid = new Array(cfg.rows * cfg.cols).fill(0);
+          for (let r = 0; r < cfg.rows; r++) {
+            for (let c = 0; c < cfg.cols; c++) {
+              if (mineMap[idx(r, c)]) { grid[idx(r, c)] = -1; continue; }
+              let count = 0;
+              neighbors(r, c).forEach(([nr, nc]) => { if (mineMap[idx(nr, nc)]) count++; });
+              grid[idx(r, c)] = count;
+            }
+          }
+        }
+
+        function buildBoard() {
+          boardEl.innerHTML = '';
+          boardEl.style.gridTemplateColumns = 'repeat(' + cfg.cols + ', 34px)';
+          revealed = new Array(cfg.rows * cfg.cols).fill(false);
+          flagged = new Array(cfg.rows * cfg.cols).fill(false);
+          for (let r = 0; r < cfg.rows; r++) {
+            for (let c = 0; c < cfg.cols; c++) {
+              const div = document.createElement('div');
+              div.className = 'cell';
+              div.dataset.r = r;
+              div.dataset.c = c;
+              div.addEventListener('click', onLeftClick);
+              div.addEventListener('contextmenu', onRightClick);
+              boardEl.appendChild(div);
+            }
+          }
+        }
+
+        function startTimer() {
+          stopTimer();
+          elapsed = 0;
+          timerEl.textContent = '0';
+          timerId = setInterval(() => {
+            elapsed++;
+            timerEl.textContent = String(elapsed);
+          }, 1000);
+        }
+
+        function stopTimer() {
+          if (timerId) { clearInterval(timerId); timerId = null; }
+        }
+
+        function flood(r, c) {
+          const stack = [[r, c]];
+          while (stack.length) {
+            const [cr, cc] = stack.pop();
+            const i = idx(cr, cc);
+            if (revealed[i] || flagged[i]) continue;
+            revealed[i] = true;
+            cellsRemaining--;
+            const cellEl = boardEl.children[i];
+            cellEl.classList.add('revealed');
+            const val = grid[i];
+            if (val > 0) {
+              cellEl.classList.add('n' + val);
+              cellEl.textContent = val;
+            } else {
+              neighbors(cr, cc).forEach(([nr, nc]) => stack.push([nr, nc]));
+            }
+          }
+        }
+
+        function revealAllMines() {
+          for (let i = 0; i < grid.length; i++) {
+            if (mineMap[i]) {
+              const cellEl = boardEl.children[i];
+              cellEl.classList.add('revealed', 'mine');
+              cellEl.textContent = '💣';
+            }
+          }
+        }
+
+        function onLeftClick(e) {
+          if (gameOver) return;
+          const r = parseInt(e.currentTarget.dataset.r, 10);
+          const c = parseInt(e.currentTarget.dataset.c, 10);
+          const i = idx(r, c);
+          if (flagged[i]) { sendLog('Click ignored (flagged) at row ' + r + ' col ' + c, { r: r, c: c }); return; }
+          if (revealed[i]) return;
+
+          if (firstClick) {
+            placeMines(r, c);
+            cellsRemaining = cfg.rows * cfg.cols - cfg.mines;
+            cellsLeftEl.textContent = cellsRemaining;
+            firstClick = false;
+            startTimer();
+            sendLog('Game started at row ' + r + ' col ' + c, { difficulty: difficultyEl.value, r: r, c: c });
+          }
+
+          if (mineMap[i]) {
+            revealed[i] = true;
+            revealAllMines();
+            gameOver = true;
+            losses++;
+            recordEl.textContent = wins + ' / ' + losses;
+            statusEl.textContent = '💥 Boom! You hit a mine.';
+            stopTimer();
+            sendLog('Mine hit — game lost at row ' + r + ' col ' + c, { r: r, c: c, elapsed: elapsed });
+            return;
+          }
+
+          flood(r, c);
+          cellsLeftEl.textContent = cellsRemaining;
+          sendLog('Revealed row ' + r + ' col ' + c + ' (value ' + grid[i] + ')', { r: r, c: c, value: grid[i] });
+
+          if (cellsRemaining === 0) {
+            gameOver = true;
+            wins++;
+            recordEl.textContent = wins + ' / ' + losses;
+            statusEl.textContent = '🎉 You win! Cleared in ' + elapsed + 's';
+            stopTimer();
+            sendLog('Game won', { elapsed: elapsed, difficulty: difficultyEl.value });
+          } else {
+            statusEl.textContent = 'Keep going. ' + cellsRemaining + ' safe cells left.';
+          }
+        }
+
+        function onRightClick(e) {
+          e.preventDefault();
+          if (gameOver || firstClick) return;
+          const r = parseInt(e.currentTarget.dataset.r, 10);
+          const c = parseInt(e.currentTarget.dataset.c, 10);
+          const i = idx(r, c);
+          if (revealed[i]) return;
+
+          flagged[i] = !flagged[i];
+          const cellEl = e.currentTarget;
+          if (flagged[i]) {
+            cellEl.classList.add('flag');
+            cellEl.textContent = '🚩';
+            flagsPlaced++;
+            sendLog('Flag placed at row ' + r + ' col ' + c, { r: r, c: c });
+          } else {
+            cellEl.classList.remove('flag');
+            cellEl.textContent = '';
+            flagsPlaced--;
+            sendLog('Flag removed at row ' + r + ' col ' + c, { r: r, c: c });
+          }
+          mineCountEl.textContent = cfg.mines - flagsPlaced;
+        }
+
+        function newGame() {
+          cfg = DIFFICULTIES[difficultyEl.value];
+          firstClick = true;
+          gameOver = false;
+          flagsPlaced = 0;
+          cellsRemaining = cfg.rows * cfg.cols - cfg.mines;
+          mineCountEl.textContent = cfg.mines;
+          cellsLeftEl.textContent = cellsRemaining;
+          timerEl.textContent = '0';
+          statusEl.textContent = 'Click any cell to start';
+          stopTimer();
+          buildBoard();
+          sendLog('New game (' + difficultyEl.value + ', ' + cfg.rows + 'x' + cfg.cols + ', ' + cfg.mines + ' mines)', { difficulty: difficultyEl.value });
+        }
+
+        resetBtn.addEventListener('click', newGame);
+        difficultyEl.addEventListener('change', newGame);
+        boardEl.addEventListener('contextmenu', e => e.preventDefault());
+
+        newGame();
+      })();

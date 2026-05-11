@@ -1,0 +1,55 @@
+volumes:
+  model_data:
+
+networks:
+  internal:
+
+services:
+    frontend:
+      image: nigelpoulton/ddd-book:ai-fe
+      command: npm run start
+      networks:
+        - internal
+      ports:
+        - target: 3000
+          published: 3000
+      environment:
+        - PORT=3000
+        - HOST=0.0.0.0
+      depends_on:
+        - backend
+
+    backend:
+      build: ./backend
+      networks:
+        - internal
+      ports:
+        - target: 8000
+          published: 8000
+      environment:
+        - MODEL_HOST=http://model:11434
+      depends_on:
+        model:
+          condition: service_healthy
+  
+    model:
+      build: ./model
+      networks:
+        - internal
+      ports:
+        - published: 11434
+          target: 11434
+      volumes:
+        - type: volume
+          source: model_data
+          target: /root/.ollama
+      environment: 
+        - MODEL=${MODEL:-qwen2.5:0.5b}
+        - OLLAMA_NUM_PARALLEL=1
+        - OLLAMA_MAX_LOADED_MODELS=1
+      healthcheck:
+        test: ["CMD-SHELL", "curl -s http://localhost:11434/api/tags | jq -e \".models[] | select(.name == \\\"${MODEL:-qwen2.5:0.5b}\\\")\" > /dev/null"]
+        interval: 10s
+        timeout: 5s
+        retries: 50
+        start_period: 900s
