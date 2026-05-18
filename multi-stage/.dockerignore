@@ -1,0 +1,4 @@
+app/target
+**/.git
+**/.idea
+**/*.iml

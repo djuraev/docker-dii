@@ -1,0 +1,22 @@
+# Multi-stage build
+# Stage 1 compiles. Stage 2 ships only JRE + jar. ~200 MB.
+
+# --- Stage 1: build ---
+FROM maven:3.9-eclipse-temurin-17 AS build
+
+WORKDIR /app
+
+COPY app/pom.xml .
+RUN mvn dependency:go-offline -B
+
+COPY app/src ./src
+RUN mvn clean package -DskipTests
+
+# --- Stage 2: runtime ---
+FROM eclipse-temurin:17-jre
+
+WORKDIR /app
+
+COPY --from=build /app/target/demo-app.jar app.jar
+
+CMD ["java", "-jar", "app.jar"]

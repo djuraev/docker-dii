@@ -1,0 +1,37 @@
+# Lightweight LLM stack: Ollama (model server) + Open WebUI (chat UI)
+# Model files persist in the `ollama` volume so pulls happen once.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"            # REST API
+    volumes:
+      - ollama:/root/.ollama     # model storage (multi-GB, keep on volume)
+    restart: unless-stopped
+    # GPU users (NVIDIA): uncomment to enable acceleration.
+    # Requires nvidia-container-toolkit on the host.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  webui:
+    image: ghcr.io/open-webui/open-webui:v0.6.5
+    ports:
+      - "3000:8080"              # http://localhost:3000
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      WEBUI_AUTH: "false"        # skip signup for the demo; turn back on for real use
+    volumes:
+      - webui:/app/backend/data
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama:
+  webui:
