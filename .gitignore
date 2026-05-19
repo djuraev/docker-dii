@@ -10,4 +10,12 @@ dist/
 build/
 .idea/
 .vscode/
-.claude
+
+# Claude Code
+.claude/
+.claude.json
+.claudeignore
+CLAUDE.local.md
+
+# typo variants seen in tree
+.qlaude

@@ -19,6 +19,9 @@ curl http://localhost:8080/
 # Insert into Postgres
 curl -X POST "http://localhost:8080/visits?note=hello"
 
+# Insert into Postgres with PowerShell
+curl.exe -X POST "http://localhost:8080/visits?note=hello"
+
 # Read from Postgres
 curl http://localhost:8080/visits
 ```
